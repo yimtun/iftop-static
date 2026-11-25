@@ -20,6 +20,9 @@ fi
 
 for arch in "${arches[@]}"; do
     out="$work/out-$arch"
+    if [[ "$arch" == aarch64 ]]; then
+        out="$out-64k"
+    fi
     mkdir -p "$out"
     cat > "$out/iftop_defconfig" <<CONFIG
 BR2_${arch}=y
@@ -27,6 +30,9 @@ BR2_TOOLCHAIN_BUILDROOT_MUSL=y
 BR2_STATIC_LIBS=y
 BR2_PACKAGE_IFTOP=y
 CONFIG
+    if [[ "$arch" == aarch64 ]]; then
+        echo BR2_ARM64_PAGE_SIZE_64K=y >> "$out/iftop_defconfig"
+    fi
     make -C "$src" O="$out" BR2_DEFCONFIG="$out/iftop_defconfig" defconfig
     make -C "$src" O="$out" iftop
     binary=$(find "$out/target" -type f -name iftop -perm /111 -print -quit)
@@ -37,6 +43,12 @@ CONFIG
     esac
     readelf -h "$binary" | grep -E "Machine: +${machine}$" >/dev/null
     segments=$(readelf -lW "$binary")
+    if [[ "$arch" == aarch64 ]]; then
+        if ! awk '$1 == "LOAD" { count++; if ($NF != "0x10000") bad=1 } END { exit (!count || bad) }' <<< "$segments"; then
+            echo "Expected 64 KiB alignment for ARM64 LOAD segments in $binary" >&2
+            exit 1
+        fi
+    fi
     dynamic=$(readelf -dW "$binary")
     if [[ "$segments" == *INTERP* || "$dynamic" == *'(NEEDED)'* ]]; then
         echo "Unexpected dynamic dependency in $binary" >&2
